@@ -31,10 +31,11 @@
 (defn wanted-nodes
   "Filters whitespace nodes from a seq of nodes, unless the whitespace prefixes a comment"
   [forms]
-  (->> (concat forms [nil])
-       (partition 2 1)
-       (remove (fn [[f s]] (and (n/whitespace? f) (not (n/comment? s)))))
-       (map first)))
+  forms
+  #_(->> (concat forms [nil])
+         (partition 2 1)
+         (remove (fn [[f s]] (and (n/whitespace? f) (not (n/comment? s)))))
+         (map first)))
 
 (defn to-value
   "Converts tokens into single values.
@@ -63,6 +64,23 @@
             n)
           k))
     :default (throw (ex-info (str "Unknown token type: " token) token))))
+
+(defn whitespace
+  "Encodes a whitespace token as triples"
+  [vt ws]
+  (let [node-ref (new-node)]
+    (add-triples vt [node-ref :t/type (n/tag ws)] [node-ref :t/length (n/length ws)])
+    node-ref))
+
+(defn to-comment
+  "Encodes a comment"
+  [vt form]
+  (let [node-ref (new-node)]
+    (add-triples vt
+                 [node-ref :t/type :comment]
+                 [node-ref :t/prefix (:prefix form)]
+                 [node-ref :t/comment (:s form)])
+    node-ref))
 
 (declare create-triples)
 
@@ -109,24 +127,57 @@
     (add-triples vt [map-ref :t/auto-resolved? auto-resolved?] [map-ref :t/prefix prefix])
     map-ref))
 
+(defn to-meta
+  "Creates a meta node, which holds both a standard node, a node for metadata, and optional separating characters."
+  [vt form]
+  (let [{prefix :prefix [meta-form & rforms] :children} form
+        node-ref (new-node)
+        meta-node (create-triples vt meta-form)
+        value-node (create-triples vt (last rforms))]
+    (add-triples vt
+                 [node-ref :t/type :meta]
+                 [node-ref :t/prefix prefix]
+                 [node-ref :t/meta meta-node]
+                 [node-ref :t/value value-node])
+    (when-let [whitespaces (butlast rforms)]
+      (add-triples vt [node-ref :t/separator (list-triples vt whitespaces)]))
+    node-ref))
+
+(defn to-rmacros
+  "Reader macro converter. This is usually based on strings, but can be structured for the particular macro"
+  [vt form]
+  (let [[t inner-form] (:children form)
+        node-ref (new-node)
+        form-ref (create-triples vt inner-form)]
+    (add-triples vt
+                 [node-ref :t/type :reader-macro]
+                 [node-ref :t/prefix t]
+                 [node-ref :t/forms form-ref])))
+
 (defn create-triples
   [vtriples form]
   (case (n/tag form)
     :token (to-value vtriples form)
+    (:whitespace :comma :newline) (whitespace vtriples form)
+    :comment (to-comment vtriples form)
     :multi-line (multi-line vtriples form)
+    :meta (to-meta vtriples form)
     (:vector :list :set :map) (to-seq vtriples form)
     :namespaced-map (to-ns-map vtriples form)
+    :reader-macro (to-rmacros vtriples form)
     (if (string? form)
       form
-      (throw (ex-info (str "Unknown type" (n/tag form)) {:form form})))))
+      (do
+        (prn form)
+        (throw (ex-info (str "Unknown type" (n/tag form)) {:form form}))))))
 
 (defn form-triples
-  [form]
+  [vtriples form]
   (let [form-ref (new-node)]
     (if *current-top-level-form*
-      (create-triples form)
+      (create-triples vtriples form)
       (binding [*current-top-level-form* form-ref]
-        (create-triples form)))
+        (create-triples vtriples form)))
     form-ref))
 
 (defn top-level-forms
