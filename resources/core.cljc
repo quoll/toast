@@ -6,6 +6,8 @@
 
   ;; a comment
 
+(def n nil)
+
 #?(:clj (def N ^{:vector true} [5])
    :cljs (def N ^{:vector true} [4]))
 

@@ -42,11 +42,13 @@
   If triples are requires to expand on the token value, then these are appended to the vt"
   [vt {:keys [value string-value lines k] :as token}]
   (cond
-    value (if (= (str value) (:string-value token))
-            value
-            (let [n (new-node)]
-              (add-triples vt [n :t/value value] [n :t/string-value string-value])
-              n))
+    (contains? token :value) (if (nil? value)
+                               :t/nil
+                               (if (= (str value) (:string-value token))
+                                 value
+                                 (let [n (new-node)]
+                                   (add-triples vt [n :t/value value] [n :t/string-value string-value])
+                                   n)))
     lines (first lines)
     k (let [{:keys [auto-resolved? map-qualifier]} token]
         (if (or auto-resolved? map-qualifier)
